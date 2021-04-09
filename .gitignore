@@ -1,0 +1,8 @@
+node/build/
+node/node_modules/
+cmd/eimclassify/eimclassify
+cmd/eimcollect/eimcollect
+cmd/eimaudio/eimaudio
+cmd/eimimage/eimimage
+cmd/eimimagereq/eimimagereq
+cmd/eimaudioreq/eimaudioreq
