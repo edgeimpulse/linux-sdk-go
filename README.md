@@ -34,19 +34,7 @@ Before you can classify data you'll first need to collect it. If you want to col
 
 ### Collecting data from the camera or microphone
 
-1. Install the Edge Impulse CLI for Linux:
-
-    ```
-    $ npm install edge-impulse-linux -g --unsafe-perm
-    ```
-
-1. Start the CLI and follow the instructions:
-
-    ```
-    $ edge-impulse-linux
-    ```
-
-1. That's it. Your device is now connected to Edge Impulse and you can capture data from the camera and microphone.
+To collect data from the camera or microphone, follow the [getting started guide](https://docs.edgeimpulse.com/docs/edge-impulse-for-linux) for your development board.
 
 ### Collecting data from other sensors
 
@@ -57,12 +45,7 @@ To collect data from other sensors you'll need to write some code to collect the
 To classify data (whether this is from the camera, the microphone, or a custom sensor) you'll need a model file. This model file contains all signal processing code, classical ML algorithms and neural networks - and typically contains hardware optimizations to run as fast as possible. To grab a model file:
 
 1. Train your model in Edge Impulse.
-1. Install the Edge Impulse CLI:
-
-    ```
-    $ npm install edge-impulse-linux -g --unsafe-perm
-    ```
-
+1. [Install the Edge Impulse for Linux CLI](https://docs.edgeimpulse.com/docs/edge-impulse-for-linux).
 1. Download the model file via:
 
     ```
