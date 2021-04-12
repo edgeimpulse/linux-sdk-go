@@ -1,3 +1,4 @@
+// Package audio implements reading audio samples and classifying samples.
 package audio
 
 import (

@@ -1,3 +1,4 @@
+// Package ffmpeg implements an image recorder with the ffmpeg command.
 package ffmpeg
 
 import (
@@ -214,7 +215,8 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 	return r, nil
 }
 
-// Close shuts down the recorder, stopping ffmpeg and removing the temporary directory.
+// Close shuts down the recorder, stopping ffmpeg and removing the temporary
+// directory.
 func (r *Recorder) Close() error {
 	if r.cancel != nil {
 		r.cancel()

@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// Runner is a running model with model & project parameters, and the ability
+// Runner is a running model with model and project parameters, and the ability
 // to classify data.
 type Runner interface {
 	ModelParameters() ModelParameters
@@ -76,14 +76,17 @@ type runnerHelloRequest struct {
 	Hello int   `json:"hello"` // 1
 }
 
-// ModelType can be "classification" or "object_detection". May be expanded in the future.
+// ModelType can be "classification" or "object_detection". May be expanded in
+// the future.
 type ModelType string
 
 const (
-	// ModelTypeClassification indicates the model returns scoring values for a set of labels.
+	// ModelTypeClassification indicates the model returns scoring values
+	// for a set of labels.
 	ModelTypeClassification ModelType = "classification"
 
-	// ModelTypeObjectDetection indicates the model returns returns bounding boxes for recognized objects.
+	// ModelTypeObjectDetection indicates the model returns returns
+	// bounding boxes for recognized objects.
 	ModelTypeObjectDetection ModelType = "object_detection"
 )
 
@@ -122,7 +125,7 @@ type ModelParameters struct {
 	HasAnomaly float64 `json:"has_anomaly"`
 }
 
-// String returns a human-readable summary about the model parameters.
+// String returns a human-readable summary of the model parameters.
 func (p ModelParameters) String() string {
 	var s string
 	switch p.SensorType {
@@ -141,7 +144,8 @@ func (p ModelParameters) String() string {
 	return s
 }
 
-// Project holds the project information stored in the model, originally from EdgeImpulse Studio.
+// Project holds the project information stored in the model, originally from
+// EdgeImpulse Studio.
 type Project struct {
 	DeployVersion int64  `json:"deploy_version"`
 	ID            int64  `json:"id"`
@@ -167,7 +171,8 @@ type RunnerClassifyRequest struct {
 	Classify []float64 `json:"classify"`
 }
 
-// RunnerClassifyResponse is the response from the model to a RunnerClassifyRequest.
+// RunnerClassifyResponse is the response from the model to a
+// RunnerClassifyRequest.
 type RunnerClassifyResponse struct {
 	RunnerResponse
 
@@ -194,7 +199,8 @@ type RunnerClassifyResponse struct {
 	} `json:"timing"`
 }
 
-// String returns a summary of the result, with classification or error message.
+// String returns a summary of the result, with classification or error
+// message.
 func (r RunnerClassifyResponse) String() string {
 	if !r.Success {
 		return fmt.Sprintf("error: %v", r.Error)
@@ -225,10 +231,13 @@ func (r RunnerClassifyResponse) String() string {
 
 // RunnerOpts contains options for starting a runner.
 type RunnerOpts struct {
-	// Explicitly set a working directory. This directory is not automatically removed on Runner.Close. If empty, a temporary directory is created.
+	// Explicitly set a working directory. This directory is not
+	// automatically removed on Runner.Close. If empty, a temporary
+	// directory is created.
 	WorkDir string
 
-	// If not empty, the JSON-encoded requests and responses are written to this directory.
+	// If not empty, the JSON-encoded requests and responses are written to
+	// this directory.
 	TraceDir string
 }
 
@@ -364,7 +373,8 @@ func (r *RunnerProcess) nextID() int64 {
 	return r.lastID
 }
 
-// Classify executes the model on the features and returns the resulting classification.
+// Classify executes the model on the features and returns the resulting
+// classification.
 func (r *RunnerProcess) Classify(data []float64) (resp RunnerClassifyResponse, rerr error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

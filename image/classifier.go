@@ -1,3 +1,5 @@
+// Package image implements fetching images from video sources, and classifying
+// images.
 package image
 
 import (
@@ -16,10 +18,11 @@ import (
 
 // ClassifyEvent is the result of classifying one image.
 type ClassifyEvent struct {
-	// If set, an error occurred and other fields are not meaningful.
+	// If not nil, an error occurred and other fields are not meaningful.
 	Err error
 
-	// The classification response from the model. Always a successful response.
+	// The classification response from the model. Always a successful
+	// response.
 	edgeimpulse.RunnerClassifyResponse
 
 	// How long classifying took.
@@ -31,7 +34,7 @@ type ClassifyEvent struct {
 }
 
 // Classifier receives images from a recorder, classifies them, and sends the
-// results on its channel Events.
+// results on channel Events.
 type Classifier struct {
 	Events chan ClassifyEvent
 
@@ -42,14 +45,14 @@ type Classifier struct {
 // ClassifierOpts are options for the classifier.
 type ClassifierOpts struct {
 	Verbose  bool   // Print verbose logging.
-	TraceDir string // If set, directory to write images sent to runner.
+	TraceDir string // If not empty, directory to write images sent to runner.
 }
 
 // NewClassifier returns a new classifier that receives messages from recorder,
 // classifies them using runner, and sends ClassifyEvents on its channel
 // Events.
 //
-// Callers must call Close to clean up the classifier, and separate close the
+// Callers must call Close to clean up the classifier, and separately close the
 // runner and recorder.
 func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *ClassifierOpts) (*Classifier, error) {
 	var xopts ClassifierOpts

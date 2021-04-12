@@ -1,4 +1,7 @@
-// reads a classification request, writes png image. expects a 96x96 image.
+// Command eimimagereq reads a classification request and writes a png image.
+//
+// Eimimagereq expects a 96x96 image.
+//
 // eimimagereq < request.json > out.png
 package main
 

@@ -1,3 +1,5 @@
+// Package imagesnap implements an image recorder with the imagesnap command
+// for macOS.
 package imagesnap
 
 import (

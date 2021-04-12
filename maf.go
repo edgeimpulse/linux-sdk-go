@@ -35,7 +35,8 @@ func NewMAF(size int, labels []string) (*MAF, error) {
 
 // Update adds one classification result to the moving average filter.
 // Update returns the smoothed values based on the history.
-// Unknown keys (labels) in classification result in an error, as does an empty classification.
+// Unknown keys (labels) in classification result in an error, as does an empty
+// classification.
 func (m *MAF) Update(classification map[string]float64) (map[string]float64, error) {
 	if m.state == nil {
 		return nil, fmt.Errorf("invalid MAF, use NewMAF")

@@ -1,3 +1,5 @@
+// Package audiocmd implements reading audio samples by executing an external
+// command.
 package audiocmd
 
 import (
@@ -137,6 +139,9 @@ func parseSoxDevices(s string) ([]audio.Device, error) {
 
 // NewRecorder starts a new command that records audio samples.
 // Recorder implements the audio.Recorder interface.
+//
+// Opts and its fields can be nil or zero, in which case default values are
+// used.
 func NewRecorder(opts *RecorderOpts) (recorder *Recorder, rerr error) {
 	var xopts RecorderOpts
 	if opts != nil {

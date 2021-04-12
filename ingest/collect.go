@@ -1,4 +1,5 @@
-// Package ingest helps to send measurement data to edgeimpulse for processing into a model.
+// Package ingest helps to send measurement data to edgeimpulse for processing
+// into a model.
 package ingest
 
 import (
@@ -26,7 +27,7 @@ type Sensor struct {
 	Units string `json:"units"`
 }
 
-// CollectPayload is data uploade to EdgeImpulse for processing.
+// CollectPayload is data to upload to EdgeImpulse for processing.
 type CollectPayload struct {
 	DeviceName string      `json:"device_name,omitempty"` // Optional.
 	DeviceType string      `json:"device_type"`
