@@ -61,6 +61,7 @@ type device struct {
 var widthRegexp = regexp.MustCompile("width=([0-9]+)[^0-9]")
 var heightRegexp = regexp.MustCompile("height=([0-9]+)[^0-9]")
 var framerateRegexp = regexp.MustCompile("framerate=([0-9]+)[^0-9]")
+var argusRegexp = regexp.MustCompile("GST_ARGUS:[ \n\r\t]*([0-9]+)[ \n\r\t]*x[ \n\r\t]*([0-9]+)[^=]*=[ \n\r\t]*([0-9,]+)[ \n\r\t]*fps")
 
 func abs(a int) int {
 	if a < 0 {
@@ -140,7 +141,13 @@ func ListDevices() ([]image.Device, error) {
 			continue
 		}
 		for _, rc := range d.RawCaps {
-			if !strings.HasPrefix(rc, "video/x-raw") {
+			var t string
+			switch {
+			case strings.HasPrefix(rc, "video/x-raw"):
+				t = "video/x-raw"
+			case strings.HasPrefix(rc, "image/jpeg"):
+				t = "image/jpeg"
+			default:
 				continue
 			}
 			mw := widthRegexp.FindStringSubmatch(rc)
@@ -157,6 +164,7 @@ func ListDevices() ([]image.Device, error) {
 			}
 			if width != 0 && height != 0 && framerate != 0 {
 				d.Caps = append(d.Caps, image.DeviceCap{
+					Type:      t,
 					Width:     int(width),
 					Height:    int(height),
 					Framerate: int(framerate),
@@ -165,6 +173,17 @@ func ListDevices() ([]image.Device, error) {
 		}
 		if len(d.Caps) == 0 {
 			continue
+		}
+
+		// If we have a video cap, only return those.
+		nc := []image.DeviceCap{}
+		for _, c := range d.Caps {
+			if c.Type == "video/x-raw" {
+				nc = append(nc, c)
+			}
+		}
+		if len(nc) > 0 {
+			d.Caps = nc
 		}
 
 		distance := func(a image.DeviceCap) int {
@@ -181,11 +200,81 @@ func ListDevices() ([]image.Device, error) {
 			Caps: d.Caps,
 		})
 	}
+
+	nvdevs, err := listNvarguscamerasrcDevices()
+	if err != nil && len(devs) == 0 {
+		return nil, err
+	}
+	devs = append(devs, nvdevs...)
+
 	if len(devs) == 0 {
 		return nil, fmt.Errorf("no devices found")
 	}
 
 	return devs, nil
+}
+
+func listNvarguscamerasrcDevices() ([]image.Device, error) {
+	cmd := exec.Command("gst-inspect-1.0")
+	buf, err := cmd.Output()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			err = errInstallHint
+		}
+		return nil, fmt.Errorf("running gst-inspect-1.0 to check for nvarguscamerasrc: %v", err)
+	}
+	if !strings.Contains(string(buf), "nvarguscamerasrc") {
+		return nil, nil
+	}
+
+	cmd = exec.Command("gst-launch-1.0", "nvarguscamerasrc")
+	buf, err = cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("running gst-launch-1.0 nvarguscamerasrc: %v", err)
+	}
+
+	var caps []image.DeviceCap
+
+	for _, line := range strings.Split(string(buf), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		m := argusRegexp.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		width, werr := strconv.ParseInt(m[1], 10, 32)
+		height, herr := strconv.ParseInt(m[2], 10, 32)
+		framerate, ferr := strconv.ParseInt(strings.Split(m[3], ".")[0], 10, 32)
+		if werr != nil || herr != nil || ferr != nil {
+			continue
+		}
+
+		if width == 0 || height == 0 || framerate == 0 {
+			continue
+		}
+
+		cap := image.DeviceCap{
+			Type:      "nvarguscamerasrc",
+			Width:     int(width),
+			Height:    int(height),
+			Framerate: int(framerate),
+		}
+		caps = append(caps, cap)
+	}
+
+	if len(caps) == 0 {
+		return nil, nil
+	}
+
+	dev := image.Device{
+		ID:   "nvarguscamerasrc",
+		Name: "CSI camera",
+		Caps: caps,
+	}
+	return []image.Device{dev}, nil
 }
 
 // NewRecorder creates a new recorder using gstream. Gstreamer writes images to a
@@ -233,19 +322,71 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 		log.Printf("gstreamer recorder, writing images to tempdir %s", r.tempDir)
 	}
 
-	args := []string{
-		"v4l2src",
-		"device=" + r.opts.DeviceID,
-		// "num-buffers=999999999",
-		"!",
-		fmt.Sprintf("video/x-raw,width=%d,height=%d", dev.Caps[0].Width, dev.Caps[0].Height),
-		"!",
-		"videoconvert",
-		"!",
-		"jpegenc",
-		"!",
-		"multifilesink",
-		"location=" + r.tempDir + "/test%05d.jpg",
+	// We want the first device config of at least 640x480, and otherwise just default to that resolution.
+	var cap *image.DeviceCap
+	for _, c := range dev.Caps {
+		if c.Width >= 640 && c.Height >= 480 {
+			cap = &c
+			break
+		}
+	}
+	if cap == nil {
+		cap = &image.DeviceCap{
+			Type:      "video/x-raw",
+			Width:     640,
+			Height:    480,
+			Framerate: 30,
+		}
+	}
+
+	var args []string
+	switch cap.Type {
+	case "video/x-raw":
+		args = []string{
+			"v4l2src",
+			"device=" + r.opts.DeviceID,
+			// "num-buffers=999999999",
+			"!",
+			fmt.Sprintf("video/x-raw,width=%d,height=%d", cap.Width, cap.Height),
+			"!",
+			"videoconvert",
+			"!",
+			"jpegenc",
+			"!",
+			"multifilesink",
+			"location=" + r.tempDir + "/test%05d.jpg",
+		}
+	case "image/jpeg":
+		args = []string{
+			"v4l2src",
+			"device=" + r.opts.DeviceID,
+			// "num-buffers=999999999",
+			"!",
+			fmt.Sprintf("image/jpeg,width=%d,height=%d", cap.Width, cap.Height),
+			"!",
+			"multifilesink",
+			"location=" + r.tempDir + "/test%05d.jpg",
+		}
+	case "nvarguscamerasrc":
+		args = []string{
+			"nvarguscamerasrc",
+			"!",
+			fmt.Sprintf("video/x-raw(memory:NVMM),width=%d,height=%d", cap.Width, cap.Height),
+			"!",
+			"nvvidconv",
+			"flip-method=0",
+			"!",
+			fmt.Sprintf("video/x-raw,width=%d,height=%d", cap.Width, cap.Height),
+			"!",
+			"nvvidconv",
+			"!",
+			"jpegenc",
+			"!",
+			"multifilesink",
+			"location=test%05d.jpg",
+		}
+	default:
+		return nil, fmt.Errorf("unknown device capability type %q", cap.Type)
 	}
 
 	if r.opts.Verbose {
