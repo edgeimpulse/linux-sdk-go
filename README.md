@@ -1,61 +1,136 @@
 # Edge Impulse Linux SDK for Go
 
-This library lets you run machine learning models and collect sensor data on Linux machines using Go. This SDK is part of [Edge Impulse](https://www.edgeimpulse.com) where we enable developers to create the next generation of intelligent device solutions with embedded machine learning. [Start here to learn more and train your first model](https://docs.edgeimpulse.com).
+Go SDK for running [Edge Impulse](https://edgeimpulse.com) machine learning models on Linux (x86_64, ARM). Models run as a separate `.eim` process; this SDK communicates with them over a Unix socket.
 
-## Installation guide
+> **Platform note:** `.eim` model files are Linux binaries. This SDK will not work on macOS or Windows.
 
-1. Install [Go 1.15](https://golang.org/dl/) or higher.
-1. Clone this repository:
+## Prerequisites
 
-    ```
-    $ git clone https://github.com/edgeimpulse/linux-sdk-go
-    ```
+- Go 1.23+
+- A trained model exported as a Linux `.eim` file (see below)
+- `sox` for audio examples, a V4L2-compatible camera for image examples
 
-1. Find the example that you want to build and run `go build`:
+## Version compatibility
 
-    ```
-    $ cd cmd/eimclassify
-    $ go build
-    ```
+| Version | Go requirement | Notes |
+|---|---|---|
+| `v1.0.0`+ | Go 1.23+ | This version — context support, continuous classification, full Node.js parity |
+| `v0.1.0` | Go 1.15+ | Legacy version, no new features, bug fixes only |
 
-1. Run the example:
+If you are on Go 1.15 and cannot upgrade, pin to the legacy version in your `go.mod`:
 
-    ```
-    $ ./eimclassify
-    ```
+```
+require github.com/edgeimpulse/linux-sdk-go v0.1.0
+```
 
-    And follow instructions.
 
-1. This SDK is also published to pkg.go.dev, so you can pull the package from there too.
+## Getting a model
+
+```sh
+npm install -g edge-impulse-cli
+edge-impulse-linux-runner --download model.eim
+# Switching projects? Add --clean
+```
+
+Or download directly from your project's **Deployment** page → **Linux (AARCH64 / x86_64)**.
+
+## Installation
+
+```sh
+go get github.com/edgeimpulse/linux-sdk-go
+```
+
+## Quick start
+
+```go
+runner, err := edgeimpulse.NewRunnerProcess("model.eim", nil)
+if err != nil {
+    log.Fatal(err)
+}
+defer runner.Close()
+
+log.Printf("project: %s", runner.Project())
+log.Printf("model:   %s", runner.ModelParameters())
+
+// Classify a slice of features (length = ModelParameters.InputFeaturesCount)
+features := make([]float64, runner.ModelParameters().InputFeaturesCount)
+resp, err := runner.ClassifyWithContext(ctx, features)
+```
+
+## Moving average filter
+
+For classification models (especially audio), smooth results over a window of N inferences to reduce false positives:
+
+```go
+maf, err := edgeimpulse.NewMAF(4, runner.ModelParameters().Labels)
+
+resp, err := runner.ClassifyWithContext(ctx, features)
+smoothed, err := maf.Update(resp.Result.Classification)
+// smoothed is a map[string]float64 averaged over the last 4 results
+```
+
+## Model types
+
+| `ModelType` | Result field |
+|---|---|
+| `classification` | `Result.Classification` — map of label → score |
+| `object_detection` / `constrained_object_detection` | `Result.BoundingBoxes` |
+| `regression` | `Result.Regression.Value` |
+
+## Continuous (sliding-window) models
+
+Audio and some sensor models use a sliding window. Pass `SliceSize` features per call instead of the full window:
+
+```go
+p := runner.ModelParameters()
+if p.UseContinuousMode {
+    slice := make([]float64, p.SliceSize*p.AxisCount)
+    // fill slice with latest sensor data...
+    resp, err := runner.ClassifyContinuousWithContext(ctx, slice)
+}
+```
+
+## Adjusting thresholds at runtime
+
+```go
+// Available thresholds are listed in runner.ModelParameters().Thresholds
+err := runner.SetThreshold(ctx, edgeimpulse.BlockThreshold{
+    ID:   0,
+    Type: "anomaly_gmm",
+    Params: map[string]float64{"min_confidence_rating": 0.7},
+})
+```
+
+## Examples
+
+| Command | Description |
+|---|---|
+| `cmd/eimaudio` | Microphone → classify in real time |
+| `cmd/eimimage` | Webcam → classify in real time |
+| `cmd/eimcollect` | Collect sensor data and upload to Edge Impulse |
+
+Build any example:
+
+```sh
+cd cmd/eimaudio && go build && ./eimaudio model.eim
+```
 
 ## Collecting data
 
-Before you can classify data you'll first need to collect it. If you want to collect data from the camera or microphone on your system you can use the Edge Impulse CLI, and if you want to collect data from different sensors (like accelerometers or proprietary control systems) you can do so in a few lines of code.
+To collect data from custom sensors and upload to Edge Impulse for training, see [`cmd/eimcollect`](cmd/eimcollect/main.go).
 
-### Collecting data from the camera or microphone
+## Testing
 
-To collect data from the camera or microphone, follow the [getting started guide](https://docs.edgeimpulse.com/docs/edge-impulse-for-linux) for your development board.
+```sh
+# Unit tests (no hardware required)
+go test ./...
 
-### Collecting data from other sensors
+# Integration tests against a real model
+EIM_PATH=./model.eim go test -tags integration -v -timeout 60s .
 
-To collect data from other sensors you'll need to write some code to collect the data from an external sensor, wrap it in the Edge Impulse Data Acquisition format, and upload the data to the Ingestion service. [Here's an end-to-end example](https://github.com/edgeimpulse/linux-sdk-go/blob/master/cmd/eimcollect/main.go).
+# Integration tests using Docker (Apple Silicon):
+docker run --platform linux/amd64 --rm -v $(pwd):/sdk -v ./model.eim:/model.eim golang:1.23 \
+  bash -c "cd /sdk && EIM_PATH=/model.eim go test -tags integration -v ."
+```
 
-## Classifying data
-
-To classify data (whether this is from the camera, the microphone, or a custom sensor) you'll need a model file. This model file contains all signal processing code, classical ML algorithms and neural networks - and typically contains hardware optimizations to run as fast as possible. To grab a model file:
-
-1. Train your model in Edge Impulse.
-1. [Install the Edge Impulse for Linux CLI](https://docs.edgeimpulse.com/docs/edge-impulse-for-linux).
-1. Download the model file via:
-
-    ```
-    $ edge-impulse-linux-runner --download modelfile.eim
-    ```
-
-    This downloads the file into `modelfile.eim`. (Want to switch projects? Add `--clean`)
-
-Then you can start classifying realtime sensor data. We have examples for:
-
-* [Audio](https://github.com/edgeimpulse/linux-sdk-go/blob/master/cmd/eimaudio/main.go) - grabs data from the microphone and classifies it in realtime.
-* [Camera](https://github.com/edgeimpulse/linux-sdk-go/blob/master/cmd/eimimage/main.go) - grabs data from a webcam and classifies it in realtime.
-* [Custom data](https://github.com/edgeimpulse/linux-sdk-go/blob/master/cmd/eimclassify/main.go) - classifies custom sensor data.
+Integration tests auto-skip features the model doesn't support (e.g. `ClassifyContinuous` on a non-continuous model).

@@ -3,12 +3,15 @@
 package image
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/draw"
 	"image/png"
 	"log"
 	"os"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	edgeimpulse "github.com/edgeimpulse/linux-sdk-go"
@@ -73,9 +76,7 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 
 	imageEvents := recorder.Events()
 
-	// Start at 2 to match the sequence numbers in the typical runner that uses message
-	// ID's, with ID 1 for the hello transaction.
-	seq := 2
+	var seq atomic.Int64
 
 	go func() {
 		for {
@@ -91,7 +92,7 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 					continue
 				}
 
-				modelSize := image.Point{modelParams.ImageInputWidth, modelParams.ImageInputHeight}
+				modelSize := image.Point{X: modelParams.ImageInputWidth, Y: modelParams.ImageInputHeight}
 
 				img := iev.Image
 				imgSize := img.Bounds().Size()
@@ -102,7 +103,12 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 					img = imageResize(img, modelSize, xopts.Verbose)
 				}
 
+				// Convert to the format the model expects.
+				// Edge Impulse image models expect one float64 per pixel, packed as
+				// 0xRRGGBB for color models, or a raw 0–255 gray value for grayscale.
+				var data []float64
 				if modelParams.ImageChannelCount == 3 {
+					// Color: ensure NRGBA so At() returns accurate R/G/B values.
 					switch img.(type) {
 					case *image.NRGBA:
 					default:
@@ -113,7 +119,20 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 						draw.Draw(nimg, nimg.Bounds(), img, image.Point{}, draw.Src)
 						img = nimg
 					}
+					data = make([]float64, modelSize.X*modelSize.Y)
+					i := 0
+					for y := 0; y < modelSize.Y; y++ {
+						for x := 0; x < modelSize.X; x++ {
+							r, g, b, _ := img.At(x, y).RGBA()
+							r >>= 8
+							g >>= 8
+							b >>= 8
+							data[i] = float64((r << 16) | (g << 8) | b)
+							i++
+						}
+					}
 				} else {
+					// Grayscale: ensure Gray so At() returns accurate gray values.
 					switch img.(type) {
 					case *image.Gray:
 					default:
@@ -124,24 +143,24 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 						draw.Draw(nimg, nimg.Bounds(), img, image.Point{}, draw.Src)
 						img = nimg
 					}
-				}
-
-				data := make([]float64, modelSize.X*modelSize.Y)
-				i := 0
-				for y := 0; y < modelSize.Y; y++ {
-					for x := 0; x < modelSize.X; x++ {
-						r, g, b, _ := img.At(x, y).RGBA()
-						r >>= 8
-						g >>= 8
-						b >>= 8
-						v := (r << 16) | (g << 8) | b
-						data[i] = float64(v)
-						i++
+					data = make([]float64, modelSize.X*modelSize.Y)
+					i := 0
+					for y := 0; y < modelSize.Y; y++ {
+						for x := 0; x < modelSize.X; x++ {
+							r, g, b, _ := img.At(x, y).RGBA()
+							r >>= 8
+							g >>= 8
+							b >>= 8
+							// Pack as 0xRRGGBB (all channels equal for gray).
+							data[i] = float64((r << 16) | (g << 8) | b)
+							i++
+						}
 					}
 				}
 
 				if xopts.TraceDir != "" {
-					pngPath := fmt.Sprintf("%s/image-%d.png", xopts.TraceDir, seq)
+					n := seq.Add(1)
+					pngPath := filepath.Join(xopts.TraceDir, fmt.Sprintf("image-%d.png", n))
 					pf, err := os.Create(pngPath)
 					if err != nil {
 						log.Printf("trace, creating %s: %v", pngPath, err)
@@ -158,13 +177,12 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, opts *Classifie
 				}
 
 				t0 := time.Now()
-				resp, err := runner.Classify(data)
+				resp, err := runner.ClassifyWithContext(context.Background(), data)
 				if err != nil {
-					c.Events <- ClassifyEvent{Err: err}
+					c.Events <- ClassifyEvent{Err: fmt.Errorf("classifying image: %w", err)}
 					continue
 				}
 				c.Events <- ClassifyEvent{nil, resp, time.Since(t0), iev.Image}
-				seq++
 			}
 		}
 	}()

@@ -6,3 +6,9 @@ cmd/eimaudio/eimaudio
 cmd/eimimage/eimimage
 cmd/eimimagereq/eimimagereq
 cmd/eimaudioreq/eimaudioreq
+
+# Root-level compiled binaries
+/eimclassify
+/eimimage
+/eimaudio
+/eimcollect
