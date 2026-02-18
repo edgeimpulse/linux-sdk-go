@@ -127,6 +127,10 @@ go test ./...
 
 # Integration tests against a real model
 EIM_PATH=./model.eim go test -tags integration -v -timeout 60s .
+
+# Integration tests using Docker (Apple Silicon):
+docker run --platform linux/amd64 --rm -v $(pwd):/sdk -v ./model.eim:/model.eim golang:1.23 \
+  bash -c "cd /sdk && EIM_PATH=/model.eim go test -tags integration -v ."
 ```
 
 Integration tests auto-skip features the model doesn't support (e.g. `ClassifyContinuous` on a non-continuous model).
