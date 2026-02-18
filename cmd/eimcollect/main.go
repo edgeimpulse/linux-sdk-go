@@ -29,7 +29,7 @@ var (
 )
 
 func usage() {
-	log.Println("usage: eimcollect [-baseurl https://...] [-label label] [-allow-duplicates] [-category split|training|testing] apikey hmackey payload.json")
+	log.Println("usage: eimcollect [-baseurl https://...] [-label label] [-disallow-duplicates] [-category split|training|testing] apikey hmackey payload.json")
 	flag.PrintDefaults()
 	os.Exit(2)
 }

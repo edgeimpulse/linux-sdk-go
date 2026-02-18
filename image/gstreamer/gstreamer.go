@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -245,7 +246,7 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 		"jpegenc",
 		"!",
 		"multifilesink",
-		"location=" + r.tempDir + "/test%05d.jpg",
+		"location=" + filepath.Join(r.tempDir, "test%05d.jpg"),
 	}
 
 	if r.opts.Verbose {
@@ -276,7 +277,7 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 	}
 	r.watcher = watcher
 
-	logf := func(format string, args ...interface{}) {
+	logf := func(format string, args ...any) {
 		if r.opts.Verbose {
 			log.Printf(format, args...)
 		}
@@ -327,7 +328,7 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 				if !ok {
 					return
 				}
-				r.imageEvents <- image.Event{Err: fmt.Errorf("watching for changes: %v", err)}
+				r.imageEvents <- image.Event{Err: fmt.Errorf("watching for changes: %w", err)}
 			}
 		}
 	}()

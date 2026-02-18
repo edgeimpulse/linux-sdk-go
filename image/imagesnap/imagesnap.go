@@ -142,7 +142,7 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 	}
 	r.watcher = watcher
 
-	logf := func(format string, args ...interface{}) {
+	logf := func(format string, args ...any) {
 		if r.opts.Verbose {
 			log.Printf(format, args...)
 		}
@@ -184,7 +184,7 @@ func NewRecorder(opts RecorderOpts) (recorder *Recorder, rerr error) {
 				if !ok {
 					return
 				}
-				r.imageEvents <- image.Event{Err: fmt.Errorf("watching for changes: %v", err)}
+				r.imageEvents <- image.Event{Err: fmt.Errorf("watching for changes: %w", err)}
 			}
 		}
 	}()

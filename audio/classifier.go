@@ -3,6 +3,7 @@ package audio
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -23,8 +24,7 @@ type ClassifyEvent struct {
 	// How long classifying took.
 	Classifying time.Duration
 
-	// The image that was classified, after transforming to fit the
-	// requirements for the model.
+	// The samples that were classified.
 	Samples []float64
 }
 
@@ -41,6 +41,10 @@ type Classifier struct {
 
 // NewClassifier starts an audio recorder, reads audio data, and classifies
 // them every interval, sending the results on its channel Events.
+//
+// For models with UseContinuousMode=true (sliding window), the classifier
+// sends SliceSize samples per call using ClassifyContinuous. For standard
+// models it accumulates a full InputFeaturesCount window and calls Classify.
 //
 // Callers must call Close on the classifier to clean it up, and separately
 // close the runner and recorder.
@@ -59,17 +63,26 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, interval time.D
 		make(chan ClassifyEvent, 1),
 	}
 
-	// We keep reading an interval worth of audio data. We keep track of a
-	// full frame with the size the model needs. So the new interval-slice
-	// of samples is appended, and oldest data chopped off.
+	// Determine whether to use continuous (sliding-window) mode.
+	continuous := modelParams.UseContinuousMode && modelParams.SliceSize > 0
+
+	// intervalSampleCount: how many samples we read per interval tick.
 	intervalSampleCount := int(modelParams.Frequency * interval.Seconds())
-	intervalBuf := make([]byte, 2*intervalSampleCount) // For single channel, 16 bit samples.
-	modelSamples := make([]float64, modelParams.InputFeaturesCount)
+	intervalBuf := make([]byte, 2*intervalSampleCount) // single channel, 16-bit PCM
+
+	// modelSamples holds the full window (InputFeaturesCount) for standard mode,
+	// or the slice window (SliceSize) for continuous mode.
+	windowSize := modelParams.InputFeaturesCount
+	if continuous {
+		windowSize = modelParams.SliceSize
+	}
+	modelSamples := make([]float64, windowSize)
 	modelSampleCount := 0
 
 	audio := recorder.Reader()
 	samples := make(chan []float64)
 
+	// Classifier goroutine: receives sample slices and calls the model.
 	go func() {
 		for {
 			s, ok := <-samples
@@ -77,7 +90,15 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, interval time.D
 				return
 			}
 			t0 := time.Now()
-			resp, err := runner.Classify(s)
+			var (
+				resp edgeimpulse.RunnerClassifyResponse
+				err  error
+			)
+			if continuous {
+				resp, err = runner.ClassifyContinuousWithContext(context.Background(), s)
+			} else {
+				resp, err = runner.ClassifyWithContext(context.Background(), s)
+			}
 			if err != nil {
 				c.Events <- ClassifyEvent{Err: err}
 				return
@@ -86,32 +107,30 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, interval time.D
 		}
 	}()
 
+	// Reader goroutine: reads audio from the recorder and fills the window.
 	go func() {
-		// When we stop, also stop the classifier.
-		defer func() {
-			close(samples)
-		}()
+		defer close(samples)
 
 		for {
 			// Read one interval-sized buffer of audio.
 			if _, err := io.ReadFull(audio, intervalBuf); err != nil {
-				c.Events <- ClassifyEvent{Err: fmt.Errorf("reading audio: %v", err)}
+				c.Events <- ClassifyEvent{Err: fmt.Errorf("reading audio: %w", err)}
 				return
 			}
 
-			// The interval may be longer than the model needs. If so, only use the end of the buffer.
+			// The interval may be longer than the window. If so, only use the end.
 			buf := intervalBuf
 			sampleCount := intervalSampleCount
-			if sampleCount > len(modelSamples) {
-				sampleCount = len(modelSamples)
+			if sampleCount > windowSize {
+				sampleCount = windowSize
 				buf = buf[2*(intervalSampleCount-sampleCount):]
 			}
 
-			// Make room for the new samples at the end of the samples buffer, overwriting leading/old samples.
+			// Shift the window left to make room for new samples at the end.
 			start := modelSampleCount
 			end := start + sampleCount
-			if end > len(modelSamples) {
-				n := end - len(modelSamples)
+			if end > windowSize {
+				n := end - windowSize
 				copy(modelSamples, modelSamples[n:])
 				start -= n
 				modelSampleCount -= n
@@ -120,18 +139,22 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, interval time.D
 			r := bytes.NewReader(buf)
 			for i := 0; i < sampleCount; i++ {
 				var v int16
-				binary.Read(r, binary.LittleEndian, &v)
+				binary.Read(r, binary.LittleEndian, &v) //nolint:errcheck
 				modelSamples[start+i] = float64(v)
 			}
 			modelSampleCount += sampleCount
 
-			if modelSampleCount < len(modelSamples) {
+			if modelSampleCount < windowSize {
+				// Haven't filled the window yet.
 				continue
 			}
 
-			// Copy samples so we don't interfere with existing classifier.
-			// This creates a lot of garbage for the collector, might want to change in the future.
-			s := make([]float64, len(modelSamples))
+			if xopts.Verbose {
+				log.Printf("classifying %d samples (continuous=%v)", windowSize, continuous)
+			}
+
+			// Copy samples so the classifier goroutine gets a stable slice.
+			s := make([]float64, windowSize)
 			copy(s, modelSamples)
 			select {
 			case samples <- s:
@@ -139,6 +162,14 @@ func NewClassifier(runner edgeimpulse.Runner, recorder Recorder, interval time.D
 				if xopts.Verbose {
 					log.Printf("dropping samples, classifier still busy")
 				}
+			}
+
+			// In continuous mode, the window slides: we keep the existing samples
+			// and let new interval data overwrite the oldest portion next iteration.
+			// In standard mode, we reset the window after each classify call so we
+			// always classify a fresh full window.
+			if !continuous {
+				modelSampleCount = 0
 			}
 		}
 	}()

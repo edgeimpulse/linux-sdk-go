@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build check
+        run: go build ./...
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          # Extract the section for this tag from CHANGELOG.md
+          TAG="${GITHUB_REF_NAME}"
+          # Grab lines between the first ## heading matching the tag and the next ##
+          awk "/^## ${TAG}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md > release_notes.txt
+          echo "Release notes:"
+          cat release_notes.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.txt
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
